@@ -1,8 +1,31 @@
 import pypower.api as pp
+import networkx as nx
 import numpy as np
+import copy
 
 BRANCH_P_INDEX = 13
 
+def ppc_to_nx(ppc):
+    G = nx.Graph()
+    G.add_nodes_from(ppc['bus'][:,0].astype(int))
+    G.add_edges_from(ppc['branch'][:,0:2].astype(int))
+    return G
+
+def nodeset_to_ppc_subgrid(nodes, ppc):
+    new_ppc = copy.deepcopy(ppc)
+    # build mask to remove buses not part of the component
+    convert_bus_list_to_mask = np.vectorize(lambda x : x in nodes)
+    mask = convert_bus_list_to_mask(ppc['bus'][:,0])
+    new_ppc['bus'] = ppc['bus'][mask]
+    return new_ppc
+
+def nx_to_ppc_components(graph, ppc):
+    for component in nx.connected_components(graph):
+        sub_ppc = nodeset_to_ppc_subgrid(component, ppc) 
+        yield sub_ppc
+
+def get_components(ppc):
+    return get_components_as_ppc(ppc_to_nx(ppc), ppc)
 
 def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
     ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if verbose else pp.ppoption(VERBOSE=0, OUT_ALL=0)
@@ -18,6 +41,16 @@ def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
         # remove failed lines
         for line in new_failed_lines:
             grid['branch'][line][2], grid['branch'][line][3] = np.inf, np.inf
+
+        sub_grids = get_components(grid)
+
+        # TO BE ADDED
+        # - CONVERT GRID TO NETWORKX GRAPH - done
+        # - FIND CONNECTED COMPONENTS OF GRAPH - done
+        # - CONVERT COMPONENTS BACK INTO PYPOWER CASEFILES - done
+        # - REBALANCE POWER GENERATION/LOAD
+        # - RUN DC POWER FLOW IN EACH COMPONENT
+        # - RECOMBINE COMPONENTS BACK INTO WHOLE GRID
 
         grid, success = pp.rundcpf(grid, ppopt)
         if not success:
