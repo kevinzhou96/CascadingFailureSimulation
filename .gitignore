@@ -1,0 +1,3 @@
+# PYPOWER test cases
+case*.py
+__pycache__/case14.cpython-35.pyc

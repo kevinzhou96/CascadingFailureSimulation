@@ -7,65 +7,11 @@ import pypower.idx_brch as idx_brch
 import pypower.idx_bus as idx_bus
 import pypower.idx_gen as idx_gen
 
-def ppc_to_nx(ppc):
-    """Converts a PYPOWER case file to a NetworkX graph, with nodes labeled with
-    bus ID's.
-
-    ARGUMENTS:  ppc: dict (representing a PYPOWER case file)
-    RETURNS:   NetworkX Graph
-    """
-    G = nx.Graph()
-    G.add_nodes_from(ppc['bus'][:, 0].astype(int))
-    # filter out failed edges
-    isActive = lambda bus : bus[idx_brch.BR_R] != np.inf
-    active_lines = np.array(list(filter(isActive, ppc['branch'])))
-    if len(active_lines) != 0:
-        # grid with no active lines is just an empty graph
-        G.add_edges_from(active_lines[:, 0:2].astype(int))
-    return G
-
-def buses_to_ppc_subgrid(buses, ppc):
-    """Given a set of buses, reduces a PYPOWER case file to the grid only
-    consisting of the buses in the bus set.
-
-    ARGUMENTS: buses: iterable (of bus ID's),
-               ppc: dict (representing a PYPOWER case file)
-    RETURNS:   dict (representing a PYPOWER case file)
-    """
-    new_ppc = copy.deepcopy(ppc)
-
-    # remove buses not in bus set
-    inBusSet = lambda bus: bus[idx_bus.BUS_I] in buses
-    new_ppc['bus'] = np.array(list(filter(inBusSet, ppc['bus'])))
-
-    return new_ppc
-
-def nx_to_ppc_components(graph, ppc):
-    """Helper function for get_components. Uses the NetworkX Graph representation
-    of a PYPOWER case file to split it into its connected components.
-
-    ARGUMENTS: graph: networkx.Graph,
-               ppc: dict (representing a PYPOWER case file)
-    RETURNS:   list of dicts (representing PYPOWER case files)
-    """
-    output = []
-    for component in nx.connected_components(graph):
-        sub_ppc = buses_to_ppc_subgrid(component, ppc) 
-        output.append(sub_ppc)
-    return output
-
-def get_components(ppc):
-    """Splits a PYPOWER case file into case files for each of its connected 
-    components.
-
-    ARGUMENTS: ppc: dict (representing a PYPOWER case file)
-    RETURNS:   list of dicts (representing PYPOWER case files)
-    """
-    return nx_to_ppc_components(ppc_to_nx(ppc), ppc)
+from get_components import get_components
 
 def rescale_power_linear(ppc):
     """Rescales power generation or load within a component uniformly among all
-    buses to balance generation and load.
+    buses to balance generation and load. Only scales values downwards.
 
     ARGUMENTS: ppc: dict (representing a PYPOWER case file)
     RETURNS:   None (does in-place update of ppc)
@@ -73,22 +19,22 @@ def rescale_power_linear(ppc):
     total_gen = sum(ppc['gen'][:, idx_gen.PG])
     total_load = sum(ppc['bus'][:, idx_bus.PD])
 
-    if total_gen > total_load:
+    if np.isclose(total_gen, total_load):
+        # no need to scale
+        return
+    elif total_gen > total_load:
         # scale generation down
         scale_factor = total_load / total_gen # note total_gen > 0
         ppc['gen'][:, idx_gen.PG] *= scale_factor
-    elif total_gen == total_load:
-        # no need to scale
-        return
     else: # total_load > total_gen
         # scale load down
         scale_factor = total_gen / total_load # note total_load > 0
         ppc['bus'][:, idx_bus.PD] *= scale_factor
 
 def rescale_power_gen(ppc):
-    """Rescales power generation only within a component uniformly among all
-    buses to match load. If total generation is zero, we cannot fulfill the load
-    and so load is set to 0.
+    """Rescales power generation only (not load) within a component uniformly
+    among all buses to match load. If total generation is zero, we cannot fulfill
+    the load and so load is set to 0.
 
     ARGUMENTS: ppc: dict (representing a PYPOWER case file)
     RETURNS:   None (does in-place update of ppc)
@@ -96,9 +42,12 @@ def rescale_power_gen(ppc):
     total_gen = sum(ppc['gen'][:, idx_gen.PG])
     total_load = sum(ppc['bus'][:, idx_bus.PD])
 
-    if total_gen == 0:
+    if np.isclose(total_gen, 0):
         # no power generated, set loads to zero
         ppc['bus'][:, idx_bus.PD] = np.zeros(len(ppc['bus']))
+    elif np.isclose(total_gen, total_load):
+        # no need to scale
+        return
     else:
         # scale generation down
         scale_factor = total_load / total_gen
@@ -134,7 +83,7 @@ def combine_components(components, original):
     return output
 
 
-def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
+def run_simulation(grid, capacities, attack_set, debug=False, step_limit=-1):
     """Runs a cascading failure simulation.
 
     addition documentation goes here
@@ -142,20 +91,20 @@ def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
     INPUT:  grid: dict (representing a PYPOWER case file),
             capacities: list (of the same length as grid['branch']),
             attack_set: iterable (of line numbers),
-            verbose: int,
+            debug: bool,
             step_limit: int
     OUTPUT: dict (containing data about the simulation)
     """
     # initialization
     grid = pp.rundcpf(copy.deepcopy(grid), pp.ppoption(VERBOSE=0, OUT_ALL=0))[0]
-    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if verbose else pp.ppoption(VERBOSE=0, OUT_ALL=0)
+    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if debug else pp.ppoption(VERBOSE=0, OUT_ALL=0)
     failed_lines = []
     failure_history = []
     new_failed_lines = attack_set
 
     counter = 0
     while len(new_failed_lines) > 0 and step_limit:
-        print(counter)
+        print("Running loop number %d" % counter)
         # keep track of failed lines
         failure_history.append(new_failed_lines)
         failed_lines.extend(new_failed_lines)
@@ -167,28 +116,50 @@ def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
 
         # rescale power and run DC power flow in each component
         components = get_components(grid)
-        for component in components:
+        if len(components) > 1:
+            print("%d components before PF" % len(components))
+        for i, component in enumerate(components):
             rescale_power_gen(component)
-            component = pp.rundcpf(grid, ppopt)[0]
+            components[i] = pp.rundcpf(grid, ppopt)[0]
+
+            ## debugging stuff, DELETE_ME
+            if len(components) > 1:
+                print("component bus data")
+                busdatamask = np.zeros(13, dtype=bool)
+                busdatamask[[0,2]] = True
+                print(component['bus'][:,busdatamask])
+                print("component branch data")
+                buses = component['bus'][:,idx_bus.BUS_I]
+                branches = np.array(list(filter(lambda branch : branch[idx_brch.F_BUS] in buses and branch[idx_brch.T_BUS] in buses, component['branch'])))
+                branchdatamask = np.zeros(17, dtype=bool)
+                branchdatamask[[0,1,3,13]] = True
+                print(branches[:,branchdatamask]) if len(branches) > 0 else print(branches)
 
         # recombine components back to grid
         grid = combine_components(components, grid)
-
-        '''
-        TO BE ADDED
-        - CONVERT GRID TO NETWORKX GRAPH - done
-        - FIND CONNECTED COMPONENTS OF GRAPH - done
-        - CONVERT COMPONENTS BACK INTO PYPOWER CASEFILES - done
-        - RESCALE POWER GENERATION/LOAD IN EACH COMPONENT - done
-        - RUN DC POWER FLOW IN EACH COMPONENT - done
-        - RECOMBINE COMPONENTS BACK INTO WHOLE GRID - done
-        '''
-
+        
+        ## debugging stuff, DELETE_ME
+        print("whole grid bus data")
+        busdatamask = np.zeros(13, dtype=bool)
+        busdatamask[[0,2]] = True
+        buses = grid['bus'][:,idx_bus.BUS_I]
+        branches = np.array(list(filter(lambda branch : branch[idx_brch.F_BUS] in buses and branch[idx_brch.T_BUS] in buses, component['branch'])))
+        branchdatamask = np.zeros(17, dtype=bool)
+        branchdatamask[[0,1,3,13]] = True
+        print(grid['bus'][:,busdatamask])
+        print("whole grid branch data")
+        print(grid['branch'][:,branchdatamask])
+        pp.printpf(grid)
+        
         # find failed lines
         new_failed_lines = []
         for i in range(len(grid['branch'])):
+            #print("available capacity in branch %d: %f - %s = %s" % (i,capacities[i],abs(grid['branch'][i][idx_brch.PF]), capacities[i]-abs(grid['branch'][i][idx_brch.PF])))
             if abs(grid['branch'][i][idx_brch.PF]) > capacities[i]:
                 new_failed_lines.append(i)
+        
+        ## debugging stuff, DELETE_ME
+        print(new_failed_lines)
 
         # decrease step counter, if active
         if step_limit > 0:
@@ -196,7 +167,7 @@ def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
 
         counter += 1
 
-    total_flow = sum([grid['branch'][i][idx_brch.PF] for i in range(len(grid['branch']))])
+    total_flow = sum(grid['branch'][:, idx_brch.PF])
 
     output_data = {"failure_history": failure_history,
                    "failed_lines": failed_lines,
@@ -205,26 +176,26 @@ def run_simulation(grid, capacities, attack_set, verbose=0, step_limit=-1):
 
     return output_data
 
-def prop_capacity_sim(grid, a, attack_set, verbose=0, step_limit=-1):
+def prop_capacity_sim(grid, a, attack_set, debug=False, step_limit=-1):
     """Runs a cascading failure simulation, with capacities proportional to
     initial load (i.e. C = (1+a)*L).
 
     See run_simulation() for more details.
     """
-    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if verbose else pp.ppoption(VERBOSE=0, OUT_ALL=0)
+    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if debug else pp.ppoption(VERBOSE=0, OUT_ALL=0)
     initial_grid = pp.rundcpf(grid, ppopt)[0]
     capacities = abs(initial_grid['branch'][:, idx_brch.PF])*(1+a)
 
-    return run_simulation(grid, capacities, attack_set, verbose, step_limit)
+    return run_simulation(grid, capacities, attack_set, debug, step_limit)
 
-def dist_capacity_sim(grid, dist, attack_set, verbose=0, step_limit=-1):
+def dist_capacity_sim(grid, dist, attack_set, debug=False, step_limit=-1):
     """Runs a cascading failure simulation, with capacities given by C = L + S, 
     where S is a random variable drawn from a given distribution.
 
     See run_simulation() for more details.
     """
-    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if verbose else pp.ppoption(VERBOSE=0, OUT_ALL=0)
+    ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if debug else pp.ppoption(VERBOSE=0, OUT_ALL=0)
     initial_grid = pp.rundcpf(grid, ppopt)[0]
     capacities = abs(initial_grid['branch'][:, idx_brch.PF]) + dist()
 
-    return run_simulation(grid, capacities, attack_set, verbose, step_limit)
+    return run_simulation(grid, capacities, attack_set, debug, step_limit)
