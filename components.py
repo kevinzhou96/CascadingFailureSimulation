@@ -7,9 +7,12 @@ import pypower.idx_brch as idx_brch
 import pypower.idx_bus as idx_bus
 import pypower.idx_gen as idx_gen
 
-#########################################
-## HELPER FUNCTIONS FOR get_components ##
-#########################################
+"""
+components.py - Helper functions for dealing with the connected components of a
+disconnected power system
+"""
+
+## HELPER FUNCTIONS FOR get_components 
 
 def ppc_to_nx(ppc):
     """Converts a PYPOWER case file to a NetworkX graph, with nodes labeled with
@@ -54,6 +57,7 @@ def buses_to_ppc_subgrid(buses, ppc):
         newGenMask = [idx_gen.GEN_BUS, idx_gen.VG, idx_gen.MBASE, idx_gen.GEN_STATUS]
         newGenVals = np.array([new_ppc['bus'][0, idx_bus.BUS_I], 1, 100, 1])
         new_ppc['gen'][0, newGenMask] = newGenVals
+        
     # remove lines not in bus set
     lineInSet = lambda line: line[idx_brch.F_BUS] in buses and line[idx_brch.T_BUS] in buses
     new_ppc['branch'] = np.array(list(filter(lineInSet, ppc['branch'])))
@@ -74,6 +78,8 @@ def nx_to_ppc_components(graph, ppc):
         output.append(sub_ppc)
     return output
 
+## END HELPER FUNCTIONS
+
 def get_components(ppc):
     """Splits a PYPOWER case file into case files for each of its connected 
     components. A nice wrapper function for nx_to_ppc_components().
@@ -83,7 +89,6 @@ def get_components(ppc):
     """
     return nx_to_ppc_components(ppc_to_nx(ppc), ppc)
 
-#------------------------------------------------------------#
 
 def combine_components(components, original):
     """Recombines the connected components of a power grid back into a single 
@@ -112,13 +117,13 @@ def combine_components(components, original):
         line_mask = np.apply_along_axis(lineInComp, 1, original['branch'])
 
         if len(component['branch']) > 0:
-            # don't try to save if there's nothing to save
+            # only save if there's something to save
             output['branch'][line_mask] = component['branch']
 
     # ensure no power flowing through failed lines
     isFailed = lambda branch : branch[idx_brch.BR_X] == np.inf
     failed_line_mask = np.apply_along_axis(isFailed, 1, output['branch'])
-    output['branch'][failed_line_mask ,idx_brch.PF] = 0
-    output['branch'][failed_line_mask ,idx_brch.PT] = 0    
+    output['branch'][failed_line_mask, idx_brch.PF] = 0
+    output['branch'][failed_line_mask, idx_brch.PT] = 0    
 
     return output

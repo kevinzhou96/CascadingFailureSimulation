@@ -14,6 +14,10 @@ import pdb
 
 DEBUG = 0
 
+"""
+simulation.py - main functions for running cascading failure simulation
+"""
+
 def run_simulation(grid, capacities, attack_set, verbose=False, step_limit=-1):
     """Runs a cascading failure simulation.
 

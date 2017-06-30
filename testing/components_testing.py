@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, '../')
 from components import *
 
-def test_ppc_to_nx(iterations=1000):
+def test_ppc_to_nx(iterations=2000):
     for i in range(iterations):
         grid = pp.case118()
         all_branches = grid['branch'][:,0:2]
@@ -31,18 +31,39 @@ def test_buses_to_ppc_subgrid(iterations=2000):
     # out of date
     for i in range(iterations):
         grid1 = pp.case118()
-        buses = sorted(random.sample(range(1,119), random.randint(0,118)))
-        del_buses = sorted(list(set(range(1,119)) - set(buses)))
-        grid1['bus'] = np.delete(grid1['bus'], np.array(del_buses, dtype=int)-1, 0)
+        buses_array_idx = sorted(random.sample(range(118), random.randint(1,118)))
+        buses = grid1['bus'][buses_array_idx]
+        bus_ids = buses[:, idx_bus.BUS_I].astype(int)
+        grid1['bus'] = buses
+
+
+        del_gens = []
+        for i, gen in enumerate(grid1['gen']):
+            if int(gen[idx_gen.GEN_BUS]) not in bus_ids:
+                del_gens.append(i)
+        grid1['gen'] = np.delete(grid1['gen'], del_gens, 0)
+
+        del_branches = []
+        for i, branch in enumerate(grid1['branch']):
+            if int(branch[idx_brch.F_BUS]) not in bus_ids or int(branch[idx_brch.T_BUS]) not in bus_ids:
+                del_branches.append(i)
+        grid1['branch'] = np.delete(grid1['branch'], del_branches, 0)
 
         grid2 = pp.case118()
-        grid2 = buses_to_ppc_subgrid(set(buses), grid2)
+        grid2 = buses_to_ppc_subgrid(set(bus_ids), grid2)
         
-        for key in grid1:
-            try:
-                assert(np.array_equal(grid1[key],grid2[key]))
-            except:
-                assert(len(grid1[key]) == 0 and len(grid2[key]) == 0)
+        assert(np.array_equal(grid1['bus'][:, idx_bus.BUS_I], grid2['bus'][:, idx_bus.BUS_I]))
+        try:
+            assert(np.array_equal(grid1['gen'][:, idx_gen.GEN_BUS], grid2['gen'][:, idx_gen.GEN_BUS]))
+        except:
+            # no generators in the component
+            assert(len(grid1['gen']) == 0)
+            assert(grid2['gen'][0, idx_gen.GEN_BUS] not in pp.case118()['gen'][:, idx_gen.GEN_BUS])
+        try:
+            assert(np.array_equal(grid1['branch'][:, idx_brch.F_BUS], grid2['branch'][:, idx_brch.F_BUS]))
+            assert(np.array_equal(grid1['branch'][:, idx_brch.T_BUS], grid2['branch'][:, idx_brch.T_BUS]))
+        except:
+            assert(len(grid1['branch']) == 0 and len(grid2['branch']) == 0)
 
 def test_nx_to_ppc_components():
     pass
@@ -50,8 +71,11 @@ def test_nx_to_ppc_components():
 def test_get_components():
     pass
 
-def test_combine_components():
+def test_combine_components(iterations=100):
     pass
+
+
+
 
 def runTests():
     print("Running all tests...")
@@ -59,19 +83,19 @@ def runTests():
     print("  Testing ppc_to_nx()... ", end='', flush=True)
     test_ppc_to_nx()
     print("success!")
-
+    
     print("  Testing buses_to_ppc_subgrid()... ", end='', flush=True)
     test_buses_to_ppc_subgrid()
     print("success!")
-    
+    '''
     print("  Testing nx_to_ppc_components()... ", end='', flush=True)
     test_nx_to_ppc_components()
     print("success!")
-    '''
+    
     print("  Testing get_components()... ", end='', flush=True)
     test_get_components()
     print("success!")
-
+    
     print("  Testing combine_components()... ", end='', flush=True)
     test_combine_components()
     print("success!")
