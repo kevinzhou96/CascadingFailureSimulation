@@ -22,7 +22,7 @@ def ppc_to_nx(ppc):
     RETURNS:   NetworkX Graph
     """
     G = nx.Graph()
-    G.add_nodes_from(ppc['bus'][:, 0].astype(int))
+    G.add_nodes_from(ppc['bus'][:, idx_bus.BUS_I].astype(int))
     # filter out failed lines
     isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
     active_lines = np.array(list(filter(isActive, ppc['branch'])))

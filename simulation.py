@@ -25,18 +25,22 @@ def run_simulation(grid, capacities, attack_set, verbose=False, step_limit=-1):
 
     INPUT:  grid: dict (representing a PYPOWER case file),
             capacities: list (of the same length as grid['branch']),
-            attack_set: iterable (of line numbers),
+            attack_set: list (of line indices),
             verbose: bool,
             step_limit: int
     OUTPUT: dict (containing data about the simulation)
     """
     # initialization
-    grid = pp.rundcpf(copy.deepcopy(grid), pp.ppoption(VERBOSE=0, OUT_ALL=0))[0]
+    if 'areas' in grid:
+        del grid['areas']
+    grid = copy.deepcopy(grid)
+    grid = pp.rundcpf(grid, pp.ppoption(VERBOSE=0, OUT_ALL=0))[0]
     initial_grid = copy.deepcopy(grid)
     ppopt = pp.ppoption(VERBOSE=0, OUT_SYS_SUM=0) if verbose else pp.ppoption(VERBOSE=0, OUT_ALL=0)
     failed_lines = []
     failure_history = []
     new_failed_lines = attack_set
+    components = []
 
     if DEBUG: counter = 0
 

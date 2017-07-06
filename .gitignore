@@ -1,3 +1,5 @@
 # PYPOWER test cases
 case*.py
 __pycache__/
+*.csv
+*.xlsx
