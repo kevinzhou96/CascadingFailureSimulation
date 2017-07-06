@@ -3,3 +3,4 @@ case*.py
 __pycache__/
 *.csv
 *.xlsx
+!data/*.csv
