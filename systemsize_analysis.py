@@ -142,6 +142,33 @@ def analyze_jsonout(space, minAttack, maxAttack, interval, fname, iterations=200
     print("Full system size analysis complete!")
 
 
+def json_to_csv(in_fname, out_fname):
+    with open(in_fname, 'r') as infile:
+        data = json.load(infile)
+
+    with open(out_fname, 'w', newline='') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(['IEEE 30-bus test case'])
+        for key in sorted(data['30bus']['average'].keys()):
+            writer.writerow([key, data['30bus']['average'][key]])
+
+        writer.writerow([])
+        writer.writerow(['IEEE 57-bus test case'])
+        for key in sorted(data['57bus']['average'].keys()):
+            writer.writerow([key, data['57bus']['average'][key]])
+        
+        writer.writerow([])
+        writer.writerow(['IEEE 118-bus test case'])
+        for key in sorted(data['118bus']['average'].keys()):
+            writer.writerow([key, data['118bus']['average'][key]])
+
+        writer.writerow([])
+        writer.writerow(['IEEE 300-bus test case'])
+        for key in sorted(data['300bus']['average'].keys()):
+            writer.writerow([key, data['300bus']['average'][key]])
+
+    return
+
 
 def main(space, minAttack, maxAttack, interval, fname, iterations=200):
     analyze_jsonout(space, minAttack, maxAttack, interval, fname, iterations=iterations)
