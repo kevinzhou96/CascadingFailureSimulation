@@ -14,21 +14,34 @@ disconnected power system
 
 ## HELPER FUNCTIONS FOR get_components 
 
-def ppc_to_nx(ppc):
+def ppc_to_nx(ppc, includeInactive=False, includeReactance=False):
     """Converts a PYPOWER case file to a NetworkX graph, with nodes labeled with
-    bus ID's.
+    bus ID's and edges including reactance values as edge attributes. If
+    includeInactive lines is set to True, the graph will include failed lines
+    (useful for graph drawing purposes). 
 
-    ARGUMENTS:  ppc: dict (representing a PYPOWER case file)
+    ARGUMENTS: ppc: dict (representing a PYPOWER case file)
+               includeInactive: bool
+               includeReactance: bool
     RETURNS:   NetworkX Graph
     """
     G = nx.Graph()
     G.add_nodes_from(ppc['bus'][:, idx_bus.BUS_I].astype(int))
-    # filter out failed lines
-    isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
-    active_lines = np.array(list(filter(isActive, ppc['branch'])))
-    if len(active_lines) > 0:
-        # ignore edges for grids with no active lines
-        G.add_edges_from(active_lines[:, 0:2].astype(int))
+    if includeInactive:
+        G.add_edges_from(ppc['branch'][:,0:2].astype(int))
+    else:
+        # filter out failed lines
+        isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
+        active_lines = np.array(list(filter(isActive, ppc['branch'])))
+        if len(active_lines) > 0:
+            # ignore edges for grids with no active lines
+            G.add_edges_from(active_lines[:, 0:2].astype(int))
+
+    # add in reactance values (for drawing purposes)
+    if includeReactance:
+        for edge in ppc['branch']:
+            G[int(edge[idx_brch.F_BUS])][int(edge[idx_brch.T_BUS])]['x'] = edge[idx_brch.BR_X]
+
     return G
 
 def buses_to_ppc_subgrid(buses, ppc):
