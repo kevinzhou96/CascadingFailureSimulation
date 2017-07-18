@@ -1,5 +1,5 @@
 import pypower.api as pp
-import networkx as nx
+import igraph as ig
 import numpy as np
 import copy
 
@@ -7,40 +7,26 @@ import pypower.idx_brch as idx_brch
 import pypower.idx_bus as idx_bus
 import pypower.idx_gen as idx_gen
 
-"""
-components.py - Helper functions for dealing with the connected components of a
-disconnected power system
-"""
+def vertex_renumbering(ppc):
+    ppc_id_to_ig = dict()
+    ig_id_to_ppc = dict()
+    for i in range(len(ppc['bus'])):
+        bus_id = ppc['bus'][i][idx_bus.BUS_I]
+        ppc_id_to_ig[bus_id] = i
+        ig_id_to_ppc[i] = bus_id
+    return (ppc_id_to_ig, ig_id_to_ppc)
 
-## HELPER FUNCTIONS FOR get_components 
+def ppc_to_ig(ppc):
+    G = ig.Graph()
+    n = len(ppc['bus'])
+    G.add_vertices(n)
 
-def ppc_to_nx(ppc, includeInactive=False, includeReactance=False):
-    """Converts a PYPOWER case file to a NetworkX graph, with nodes labeled with
-    bus ID's and edges including reactance values as edge attributes. If
-    includeInactive lines is set to True, the graph will include failed lines
-    (useful for graph drawing purposes). 
-
-    ARGUMENTS: ppc: dict (representing a PYPOWER case file)
-               includeInactive: bool
-               includeReactance: bool
-    RETURNS:   NetworkX Graph
-    """
-    G = nx.Graph()
-    G.add_nodes_from(ppc['bus'][:, idx_bus.BUS_I].astype(int))
-    if includeInactive:
-        G.add_edges_from(ppc['branch'][:,0:2].astype(int))
-    else:
-        # filter out failed lines
-        isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
-        active_lines = np.array(list(filter(isActive, ppc['branch'])))
-        if len(active_lines) > 0:
-            # ignore edges for grids with no active lines
-            G.add_edges_from(active_lines[:, 0:2].astype(int))
-
-    # add in reactance values (for drawing purposes)
-    if includeReactance:
-        for edge in ppc['branch']:
-            G[int(edge[idx_brch.F_BUS])][int(edge[idx_brch.T_BUS])]['x'] = edge[idx_brch.BR_X]
+    isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
+    active_lines = np.array(list(filter(isActive, ppc['branch'])))
+    ppc_id_to_ig = vertex_renumbering(ppc)[0]
+    renumber_edge = lambda branch : (ppc_id_to_ig[branch[0]], ppc_id_to_ig[branch[1]])
+    edges = np.apply_along_axis(renumber_edge, 1, active_lines[:,0:2].astype(int))
+    G.add_edges(edges)
 
     return G
 
@@ -77,26 +63,18 @@ def buses_to_ppc_subgrid(buses, ppc):
 
     return new_ppc
 
-def nx_to_ppc_components(graph, ppc):
-    """Helper function for get_components. Uses the NetworkX Graph representation
-    of a PYPOWER case file to split it into its connected components.
+def ig_to_ppc_components(graph, ppc):
+    output = []
+    ig_id_to_ppc = vertex_renumbering(ppc)[1]
 
-    ARGUMENTS: graph: networkx.Graph,
-               ppc: dict (representing a PYPOWER case file)
-    RETURNS:   list of dicts (representing PYPOWER case files)
-    """
-    return [buses_to_ppc_subgrid(component, ppc) for component in nx.connected_components(graph)]
-
-## END HELPER FUNCTIONS
+    output = []
+    for component in graph.components():
+        buses = [ig_id_to_ppc[vtx] for vtx in component]
+        output.append(buses_to_ppc_subgrid(buses, ppc))
+    return output
 
 def get_components(ppc):
-    """Splits a PYPOWER case file into case files for each of its connected 
-    components. A nice wrapper function for nx_to_ppc_components().
-
-    ARGUMENTS: ppc: dict (representing a PYPOWER case file)
-    RETURNS:   list of dicts (representing PYPOWER case files)
-    """
-    return nx_to_ppc_components(ppc_to_nx(ppc), ppc)
+    return ig_to_ppc_components(ppc_to_ig(ppc), ppc)
 
 
 def combine_components(components, original):
