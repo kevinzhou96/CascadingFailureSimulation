@@ -16,17 +16,38 @@ def vertex_renumbering(ppc):
         ig_id_to_ppc[i] = bus_id
     return (ppc_id_to_ig, ig_id_to_ppc)
 
-def ppc_to_ig(ppc):
+def renumber_branch(branch, refDict):
+    branch = copy.deepcopy(branch)
+    branch[idx_brch.F_BUS] = refDict[branch[idx_brch.F_BUS]]
+    branch[idx_brch.T_BUS] = refDict[branch[idx_brch.T_BUS]]
+    return branch
+
+def ppc_to_ig(ppc, includeInactive=False, includeData=False):
     G = ig.Graph()
     n = len(ppc['bus'])
     G.add_vertices(n)
-
-    isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
-    active_lines = np.array(list(filter(isActive, ppc['branch'])))
     ppc_id_to_ig = vertex_renumbering(ppc)[0]
-    renumber_edge = lambda branch : (ppc_id_to_ig[branch[0]], ppc_id_to_ig[branch[1]])
-    edges = np.apply_along_axis(renumber_edge, 1, active_lines[:,0:2].astype(int))
+    renumber = lambda branch : renumber_branch(branch, ppc_id_to_ig)
+
+    if includeInactive:
+        branches = np.apply_along_axis(renumber, 1, ppc['branch'])
+    else:
+        isActive = lambda branch : branch[idx_brch.BR_X] != np.inf
+        active_lines = np.array(list(filter(isActive, ppc['branch'])))
+        branches = np.apply_along_axis(renumber, 1, active_lines)
+    edges = branches[:, 0:2].astype(int)
     G.add_edges(edges)
+
+    if includeData:
+        bus_gen = [0.] * len(ppc['bus'])
+        for gen in ppc['gen']:
+            bus_gen[ppc_id_to_ig[gen[idx_gen.GEN_BUS]]] = gen[idx_gen.PG]
+        bus_loads = ppc['bus'][:, idx_bus.PD]
+        loads = branches[:, idx_brch.PF]
+        G.vs['gen'] = bus_gen
+        G.vs['load'] = bus_loads
+        G.es['load'] = loads
+        G.es['isFailed'] = np.apply_along_axis(lambda x : x == np.inf, 0, branches[:, idx_brch.BR_X])
 
     return G
 

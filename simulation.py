@@ -67,7 +67,7 @@ def system_summary(grid, components, capacities):
 simulation.py - main functions for running cascading failure simulation
 """
 
-def run_simulation(grid, capacities, attack_set, detail=False):
+def run_simulation(grid, capacities, attack_set, verbose=False, saveIterations=False):
     """Runs a cascading failure simulation.
 
     addition documentation goes here
@@ -92,8 +92,10 @@ def run_simulation(grid, capacities, attack_set, detail=False):
     failure_history = []
     new_failed_lines = attack_set
     components = []
+    if saveIterations:
+        grid_history = [copy.deepcopy(grid)]
 
-    if detail:
+    if verbose:
         counter = 0
         print("Initial system summary:")
         print(system_summary(grid, [grid], capacities))
@@ -101,7 +103,7 @@ def run_simulation(grid, capacities, attack_set, detail=False):
 
 
     while len(new_failed_lines) > 0:
-        if detail:
+        if verbose:
             print()
             temp = input("About to run loop %d. Press enter to continue." % counter)
 
@@ -130,12 +132,14 @@ def run_simulation(grid, capacities, attack_set, detail=False):
             if abs(grid['branch'][i][idx_brch.PF]) > capacities[i]:
                 new_failed_lines.append(i)
 
-        if detail:
+        if verbose:
             print(system_summary(grid, components, capacities))
             print("Lines to fail: %s" % new_failed_lines)
             counter += 1
-        
 
+        if saveIterations:
+            grid_history.append(copy.deepcopy(grid))
+        
     # compute power loss
     final_power = sum(grid['bus'][:, idx_bus.PD])
     power_loss = (initial_power - final_power) / initial_power
@@ -161,12 +165,15 @@ def run_simulation(grid, capacities, attack_set, detail=False):
                    "components": components,
                    "isolated_components": isolated_components,
                    "isolated_buses": isolated_buses,
-                   "grid": grid}
+                   "grid": grid,
+                   "capacities": capacities}
+    if saveIterations:
+        output_data["grid_history"] = grid_history
 
     return output_data
 
 
-def proportional_sim(grid, a, attack_set, detail=False):
+def proportional_sim(grid, a, attack_set, verbose=False, saveIterations=False):
     """Runs a cascading failure simulation, with capacities proportional to
     initial load (i.e. C = (1+a)*L).
 
@@ -176,9 +183,10 @@ def proportional_sim(grid, a, attack_set, detail=False):
     initial_grid = pp.rundcpf(grid, ppopt)[0]
     capacities = abs(initial_grid['branch'][:, idx_brch.PF])*(1+a)
 
-    return run_simulation(grid, capacities, attack_set, detail)
+    return run_simulation(grid, capacities, attack_set, verbose=verbose,
+                          saveIterations=saveIterations)
 
-def iid_sim(grid, dist, attack_set, detail=False):
+def iid_sim(grid, dist, attack_set, verbose=False, saveIterations=False):
     """Runs a cascading failure simulation, with capacities given by C = L + S, 
     where S is a random variable drawn from a given distribution.
 
@@ -188,4 +196,5 @@ def iid_sim(grid, dist, attack_set, detail=False):
     initial_grid = pp.rundcpf(grid, ppopt)[0]
     capacities = abs(initial_grid['branch'][:, idx_brch.PF]) + dist()
 
-    return run_simulation(grid, capacities, attack_set, detail)
+    return run_simulation(grid, capacities, attack_set, verbose=verbose,
+                          saveIterations=saveIterations)

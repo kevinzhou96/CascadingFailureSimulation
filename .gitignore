@@ -5,3 +5,5 @@ __pycache__/
 *.xlsx
 !data/*.csv
 *.json
+*.png
+!images/*.png
